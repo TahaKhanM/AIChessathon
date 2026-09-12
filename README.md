@@ -2,19 +2,11 @@
 
 **2nd of 334 teams in the AI Chessathon Final Qualification · 10/13 points · University of Warwick**
 
-A chess-engine project in **resource-constrained optimization, adversarial search and exact numerical inference**. Miskeen explores a practical question: how much decision quality can you extract from one CPU core, a fixed memory budget and a clock that never stops for computation?
+A Python/Numba chess engine combining **principal variation search, incremental integer neural evaluation and explicit runtime resource management**. The repository includes a runnable baseline, a CPU training pipeline, versioned model exports, differential correctness tests and reproducible benchmarks.
 
-> “We must make the best use that we can of the things which are in our power…”
->
-> — Epictetus, [*Discourses*, Book I, Chapter 1](https://classics.mit.edu/Epictetus/discourses.1.one.html), excerpt
+The engineering focus is the interaction between model accuracy and execution cost: search selectivity, memory layout, cache reuse, quantization, cancellation and reproducible evaluation under a fixed clock.
 
-## Why “Miskeen”?
-
-*Miskīn* (مسكين) means poor or needy in Arabic: someone whose means do not meet their needs. The [Cairo Arabic Language Academy's definition](https://www.arabicacademy.gov.eg/ar/محرك-البحث/معجم/dic-19/المسكين) grounds that meaning in having too little to provide for one's household.
-
-I chose the name as a reminder that circumstances rarely arrive in the form we would have chosen. We inherit a position, a set of resources and a limited amount of time. What remains ours is the care with which we use them. For this project, that belief becomes an engineering discipline: preserve useful work, spend computation where it can change a decision, and make every byte earn its place.
-
-The board gives Miskeen a position. The clock gives it a limit. The next move is its responsibility.
+[Architecture](#technical-overview) · [Quickstart](#install-and-choose-a-move) · [Training](#train-your-own-evaluator) · [Verification](#verify-and-measure)
 
 ## Competition result
 
@@ -47,7 +39,7 @@ The engine combines iterative-deepening principal variation search with a sparse
 | Statistical leakage and label ambiguity | Grouped splits, canonical board keys, provenance, bounds and censoring semantics | [`splits.py`](training/splits.py), [`labels.py`](training/labels.py) |
 | Reproducible measurement | Fixed positions, fresh transposition tables, source fingerprints and per-sample metadata | [`bench/run.py`](bench/run.py) |
 
-The optimization target is **expected game score under the complete runtime budget**. Static prediction loss, nodes per second, search depth and model size are useful diagnostics; none alone determines the quality of the deployed decision. This is the same distinction that matters in quantitative research when an attractive model must survive execution costs, state uncertainty and operational failure.
+The optimization target is **expected game score under the complete runtime budget**. Evaluation accuracy affects the quality of leaf estimates; inference cost affects how many useful branches can be searched; selectivity and move ordering determine where that work is spent. Experiments therefore need both statistical controls over the position distribution and operational measurements of the complete engine.
 
 ### Search and state
 
@@ -72,6 +64,38 @@ Three details matter at the systems boundary:
 - **Missing history remains unknown.** The interface supplies FEN observations rather than a complete game record. The engine reconciles legal endpoints and represents an unknown prefix explicitly; it does not invent repetition evidence.
 
 Null moves belong to the search tree, not to played history. Mate scores, legal-game plies and the absolute game horizon are handled separately.
+
+### Transposition-table layout and reuse semantics
+
+The transposition table packs each entry into **two 64-bit words** and groups four entries into a **64-byte cluster**. At a 128 MiB table allocation, this provides 8,388,608 entry slots; the public baseline and README examples use smaller 8 MiB tables.
+
+| Packed field group | Information retained |
+|---|---|
+| Identity and ordering | 32-bit position tag, 15-bit move, search depth, bound type and generation |
+| Search evidence | Signed 16-bit search score and raw static evaluation |
+| Value context | Halfmove clock, horizon band, model version and utility version |
+| Repetition context | Repetition-count band and unknown-history-prefix flag |
+
+Probe logic separates **move ordering**, **raw evaluation reuse** and **score cutoffs**. A stored lower or upper bound is useful for pruning only when depth, search window and context checks permit it. Mate scores are normalized on storage and adjusted for the probing ply. Online correction history is applied to the raw evaluation by the searcher rather than permanently folded into the cached value.
+
+Production reuse uses declared approximations, including repetition and horizon bands. The separate `StrictTable` audit oracle keys scores by exact counters and a fingerprint of the complete known reversible history. Counterfactual-history tests compare those policies on positions with identical geometry but different draw implications. See [`engine/tt.py`](engine/tt.py) and [`tests/test_tt.py`](tests/test_tt.py).
+
+### Compiled execution and memory layout
+
+The compiled backend represents mutable state as fixed-offset regions in preallocated, dtype-specific NumPy arrays:
+
+```text
+ctx = (uint64, int64, int32, int16, int8, uint8, uint32, transposition_table)
+          │
+          └─ board state · per-ply moves · search stack · histories
+             accumulator stack · model tables · clock state
+```
+
+Move buffers and search stacks are addressed by ply and offset, keeping Python objects out of the recursive Numba hot path. Weight regions sit at the ends of their arrays so earlier offsets remain constant across configurations. Since array length is not part of Numba's array type, the context can retain the same type signature for classical and neural evaluation configurations.
+
+The native monotonic-clock bridge lets compiled search poll a hard deadline without returning to the Python driver at every node. Each backend keeps deadline arithmetic within its own clock domain. Poll frequency and unwind margins determine stopping latency, while the soft allocator decides whether to start another iteration.
+
+Compilation and cache loading are tested as distinct lifecycle events. A two-process regression first builds a fresh cache and then loads it in another process, exercising recursive search specializations and node-limit aborts. This catches unresolved compiled-call references that a same-process smoke test would miss. See [`layout.py`](engine/kernels/layout.py), [`nclock.py`](engine/kernels/nclock.py) and the [cache regression](tests/test_kernels_segload.py).
 
 ### F512-EF-K12-16/32 evaluator
 
@@ -105,6 +129,20 @@ One of eight heads is selected by `min(7, max(0, (piece_count - 2) // 4))`. The 
 Arithmetic is part of the model specification. For a hidden affine output `z`, let `x = z >> 6`; the branches are `clip(x, 0, 127)` and `clip((x*x) >> 7, 0, 127)`. The square is taken **before clipping x**, including for negative x. Widening and arithmetic right shifts must agree across training, scalar reference and compiled runtime.
 
 The packed numerical payload is **32,900,768 bytes**, before container metadata and engine source. Packed storage, decoded arrays and initialization peak RSS are separate budgets. See the [machine-readable contract](spec/RX_FINAL_PLAN/architecture.json) and [architecture notes](docs/architecture.md).
+
+### Incremental evaluation and export integrity
+
+For perspective `p`, the feature transform is a sparse sum:
+
+```text
+a_p = bias + Σ W_psq[row] + Σ W_threat[row] + Σ W_pawn_pair[row]
+```
+
+A full refresh costs work proportional to the number of active rows times the 512-channel width. Incremental updates instead apply removed and added rows, with cost proportional to the changed feature set. Captures, promotions, castling and en passant require their corresponding geometry changes; king-frame transitions require perspective refreshes. Push/pop state ties accumulator lifetime to reversible board updates.
+
+RXF1 stores a little-endian header, bounded JSON metadata and ordered coefficient sections. Signed fields use two's-complement packing with explicit bit order and terminal padding. A SHA-256 digest covers metadata and payload; the loader also validates dimensions, coefficient ranges and format identity. Decoding proceeds in bounded chunks so temporary unpacking arrays do not scale to the entire model payload at once.
+
+The verification chain compares the quantized training forward pass, scalar integer reference, serialized export and Numba runtime. It tests exact outputs rather than a floating-point tolerance that could conceal rounding or activation-order differences. The [packing oracle](spec/RX_FINAL_PLAN/signed_packing_reference.py) provides an independent scalar implementation for codec comparisons.
 
 ## Install and choose a move
 
@@ -267,6 +305,14 @@ docs/                     architecture, verification and competition screenshot
 The competition environment required one CPU core, 2 GB RAM, no network or GPU, and at most 50,000,000 unpacked bytes, with a 120-second clock plus 0.5 seconds per legal move. The [competition documentation](https://aichessathon.com/docs), checked 12 September 2026, distinguishes 90-second qualifier initialization from 30-second final initialization. This public source release has not been requalified against the final initialization budget.
 
 Tournament checkpoints, private datasets, provider administration and historical experiment archives are excluded. The qualification result belongs to Miskeen's competition entry; new models trained from this repository must establish their own strength through controlled, paired-colour games and complete-package resource checks.
+
+## About the name
+
+*Miskeen* takes its name from Arabic [*miskīn* (مسكين)](https://www.arabicacademy.gov.eg/ar/محرك-البحث/معجم/dic-19/المسكين). It is a small nod to the project's beginnings without large-scale compute, and the emphasis that followed: efficient algorithms, careful measurement and making the most of the available hardware.
+
+> “We must make the best use that we can of the things which are in our power…”
+>
+> — Epictetus, [*Discourses*, Book I, Chapter 1](https://classics.mit.edu/Epictetus/discourses.1.one.html), excerpt
 
 ## Licence and attribution
 
