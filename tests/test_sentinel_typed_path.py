@@ -31,21 +31,27 @@ def test_real_scores_still_decode():
     assert 0.0 <= cp_to_u(-30000, None) <= 1.0
 
 
-# --- third path: the encode farm (FR2 blocker 2) ----------------------------
-# `build()` filtered sentinels, but `encode_farm.do_datav2` called
-# `encode_records` DIRECTLY and did not, producing bound_lo=0.999, wdl=[1,0,0],
-# result=2 on a SKIPPED record. The test above could not see that path — which
-# is exactly the "one module fixed, the other still live" pattern from ruling 31,
-# repeated a third time. The guard now lives in the shared encoder.
+def test_batch_rejects_sentinel_rows():
+    """A mixed batch must not turn a skipped observation into a win target."""
+    import chess
 
+    from training.features import FeatureEncoder
+    from training.records import make_observation
+    from training.train import build_batch
 
-def test_encode_records_rejects_sentinel_rows():
-    import numpy as np
-    from training.f512 import build_datav2 as bd
-    from training.f512.rx9records import RECORD_DTYPE
+    def record(score):
+        return {
+            "record_id": f"synthetic-score-{score}",
+            "position": {"fen4": " ".join(chess.STARTING_FEN.split()[:4])},
+            "observations": [
+                make_observation(
+                    kind="searched", perspective="side_to_move", score_kind="cp", cp=score
+                )
+            ],
+        }
 
-    rec = np.zeros(2, dtype=RECORD_DTYPE)
-    rec["score"][0] = 0
-    rec["score"][1] = bd.SENTINEL_SKIP
-    with pytest.raises(ValueError, match="skip sentinel"):
-        bd.encode_records(rec, 1.0)
+    encoder = FeatureEncoder()
+    ordinary = record(0)
+    assert build_batch([ordinary], encoder).u_targets == [[0.5]]
+    with pytest.raises(SentinelError, match="skip sentinel"):
+        build_batch([ordinary, record(SENTINEL_SKIP)], encoder)

@@ -34,4 +34,4 @@ select = ["E4", "E7", "E9", "F", "B"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "--strict-markers --strict-config -m 'not slow'"
-markers = ["slow: exhaustive high-depth perft checks (hundreds of millions of leaves)"]
+markers = ["slow: extended perft and randomized search stress checks"]

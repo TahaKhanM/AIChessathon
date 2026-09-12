@@ -1,40 +1,13 @@
-"""Blocker-2 repair gates: abort-PV provenance and root-terminal agreement.
+"""Abort-commit and root-terminal regressions.
 
-Two search blockers were confirmed by independent review
-(``work/reviews/R6-w03-audit.md``, ``work/reviews/R7-w03-search.md``) and
-measured on the shipped ``rx_agent`` package in an official 120+0.5 smoke
-(3 torn-PV replies in 20 plies —
-``work/reviews/r16-rx-agent-evidence/summary.json``):
+An aborted iteration must not overwrite the last completed principal
+variation. When no iteration completed, the pre-search legal fallback
+remains authoritative. Node-limit and monotonic-clock aborts exercise
+restoration at different points in the tree.
 
-1. Abort-PV overwrite — ``search()`` assigned ``result.move =
-   info.root_best`` when the in-flight iteration aborted, overwriting the
-   last COMPLETED iteration's committed move with a torn root candidate.
-   The returned move must always originate from a completed iteration
-   (or be the pre-search legal fallback when no iteration completed).
-
-2. Root-terminal hole — the ``if not root:`` guard skipped all draw
-   adjudication at ply 0, so roots already terminal under the referee's
-   rules (fifty-move, threefold, ply cap, insufficient material) ran a
-   live search and returned live scores/moves. Root adjudication must
-   agree with ``external/aichessathon-starter/harness/referee.py``:
-   ordinary ``outcome()`` (mate > insufficient > stalemate > seventyfive >
-   fivefold), then threefold, then fifty-move, then absolute ply >= 600 —
-   with a mate at the cap decided by the earlier terminal check, never by
-   the cap.
-
-Layout of this file:
-
-- ``test_regression_*`` — deterministic cases that FAIL against the
-  pre-repair driver (the failing runs are pasted in
-  ``engine/W03_FIX_REPORT.md``).
-- ``test_abort_committed_move_gate`` — >= 20,000 randomized abort points
-  over both abort mechanisms (node limit and monotonic clock) and every
-  poll-site phase; the returned move is always the committed one.
-- ``test_root_terminal_agreement_gate`` — >= 50,000 randomized terminal
-  and near-terminal positions through the shipped ``search()`` path, plus
-  the patched ``_ab`` root branch directly; zero disagreements with the
-  referee oracle.
-"""
+Root adjudication checks ordinary outcomes before threefold repetition,
+fifty-move draws and the absolute 600-ply cap. Mate at the cap must be
+resolved before the cap's draw rule."""
 
 from __future__ import annotations
 
@@ -42,6 +15,7 @@ import random
 import time
 
 import chess
+import pytest
 
 from engine.board import MAX_MOVES, move_to_uci
 from engine.movegen import generate_legal
@@ -345,7 +319,8 @@ def test_pre_fifty_mate_in_one_play_path_still_searches() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_abort_committed_move_gate() -> None:
+@pytest.mark.parametrize("target", [256, pytest.param(ABORTS_TARGET, marks=pytest.mark.slow)])
+def test_abort_committed_move_gate(target: int) -> None:
     """Aborting mid-iteration never returns a torn root move.
 
     For every aborted search with at least one completed iteration the
@@ -367,7 +342,7 @@ def test_abort_committed_move_gate() -> None:
     phases_ow: dict[int, int] = {}
     clock_aborts = 0
     examples = []
-    while aborts < ABORTS_TARGET:
+    while aborts < target:
         fen = rng.choice(ABORT_FENS)
         gs = GameState.from_fen(fen)
         buf = [0] * MAX_MOVES
@@ -453,7 +428,7 @@ def test_abort_committed_move_gate() -> None:
     assert exceptions == 0, f"{exceptions} torn-PV returns"
     # Coverage: both poll-site phases and a strong completed-iteration body.
     assert phases_all.get(1, 0) > 0 and phases_all.get(2, 0) > 0
-    assert with_committed >= ABORTS_TARGET // 2
+    assert with_committed >= target // 2
 
 
 # ---------------------------------------------------------------------------
@@ -546,9 +521,11 @@ def _root_search_compare(cb: chess.Board, gs: GameState, s: Searcher, bad: list)
         bad.append((cb.fen(), want, res.score, res.depth, res.uci))
 
 
-def test_root_terminal_agreement_gate() -> None:
+@pytest.mark.parametrize("target", [1000, pytest.param(TERMINAL_POSITIONS, marks=pytest.mark.slow)])
+def test_root_terminal_agreement_gate(target: int) -> None:
     """``_ab`` at ply 0 and ``search()`` both agree with the referee on
-    >= 50,000 randomized terminal and near-terminal positions.
+    a deterministic sample of terminal and near-terminal positions.
+    The extended profile uses at least 50,000 positions.
 
     Terminal roots return exactly the referee's decision — DRAW (0) for
     every draw rule, -MATE for a mated root — and never run a live search
@@ -568,10 +545,10 @@ def test_root_terminal_agreement_gate() -> None:
 
     # (1) bulk random playouts: every position through _ab at the root,
     # every 10th also through the shipped search() path.
-    while compared < 40_000:
+    while compared < target * 4 // 5:
         cb = chess.Board()
         gs = GameState.from_fen(START)
-        while compared < 40_000:
+        while compared < target * 4 // 5:
             compared += _root_ab_compare(cb, gs, s, reasons, bad_ab)
             if compared % 10 == 1:
                 _root_search_compare(cb, gs, s, bad_search)
@@ -665,7 +642,7 @@ def test_root_terminal_agreement_gate() -> None:
             cb.push_uci(u)
 
     # (3) pad to >= 50,000 with playouts from varied opening depths
-    while compared < TERMINAL_POSITIONS:
+    while compared < target:
         cb = chess.Board()
         gs = GameState.from_fen(START)
         for _ in range(rng.randint(2, 30)):
@@ -674,7 +651,7 @@ def test_root_terminal_agreement_gate() -> None:
             mv = rng.choice(list(cb.legal_moves))
             gs.apply_own_uci(mv.uci())
             cb.push(mv)
-        while compared < TERMINAL_POSITIONS:
+        while compared < target:
             compared += _root_ab_compare(cb, gs, s, reasons, bad_ab)
             if compared % 10 == 1:
                 _root_search_compare(cb, gs, s, bad_search)
@@ -696,7 +673,7 @@ def test_root_terminal_agreement_gate() -> None:
     for row in bad_search[:8]:
         print(" search disagree", row)
     assert not bad_ab and not bad_search
-    assert compared >= TERMINAL_POSITIONS
+    assert compared >= target
     for k in (
         "checkmate",
         "threefold_repetition",

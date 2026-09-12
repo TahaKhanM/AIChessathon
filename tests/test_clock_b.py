@@ -1,8 +1,7 @@
-"""clock_b gates: remaining-moves, increment, abort-PV, monotonic hard stop.
+"""Time-allocation and cancellation contracts.
 
-These tests are written to FAIL on the R16 `_HorizonAllocator` (est_moves≈290,
-hard_ms≈785 at ply 12) and on an abort path that plays a torn PV.
-"""
+Cover bounded moves-to-go estimates, increment timing, committed principal
+variations and monotonic hard deadlines."""
 
 from __future__ import annotations
 

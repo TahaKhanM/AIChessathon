@@ -7,7 +7,7 @@ help:
 test:
 	$(PYTHON) -m pytest tests -q
 test-deep:
-	$(PYTHON) -m pytest tests/test_movegen.py -m slow -q
+	$(PYTHON) -m pytest tests -m slow -q
 
 lint:
 	$(RUFF) check .
