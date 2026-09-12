@@ -1,0 +1,41 @@
+{
+  "checked_at_utc": "2026-09-12T14:03:29.029646+00:00",
+  "source_revision": "90c38d908f3d0fd5f0a3da1fc82fa9ed4b0b406c",
+  "engine_source_sha256": "6df3dd689173a6ba9d18b80783b4c62ddd950f49e42fc1e21fbabc1eccf7e207",
+  "python": "3.12.13",
+  "machine": "arm64",
+  "tests": {
+    "default_cases_covered": 248,
+    "extended_cases_not_run": 8,
+    "full_run": {
+      "passed": 247,
+      "failed": 1,
+      "deselected": 8,
+      "seconds": 293.78,
+      "failure": "A test imported an excluded historical encoder."
+    },
+    "correction": "Replaced that test with sentinel rejection through training.train.build_batch.",
+    "focused_rerun": {
+      "command": "python -m pytest tests/test_sentinel_typed_path.py -q",
+      "passed": 6,
+      "seconds": 0.19
+    },
+    "interpretation": "All current default cases covered across the full run and the focused rerun; no claim of a subsequent full-suite run."
+  },
+  "lint": {
+    "ruff_check": "passed",
+    "ruff_format_check": "passed"
+  },
+  "package": {
+    "wheel_build": "passed",
+    "sdist_build": "passed",
+    "isolated_wheel_import": "passed",
+    "isolated_legal_move": "passed",
+    "clock_package_data": "passed"
+  },
+  "credentials": {
+    "public_tree": "no findings",
+    "publication_history": "no findings at time of scan"
+  },
+  "scope": "Local macOS arm64 verification. GitHub CI and target-hardware qualification have not been run."
+}
