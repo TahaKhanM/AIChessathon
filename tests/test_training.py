@@ -1,6 +1,6 @@
-"""W04 gate tests: sparse training/import pipeline.
+"""Sparse training and import pipeline regressions.
 
-Gates (pasted verbatim into training/W04_REPORT.md):
+Coverage:
  1. random-init pilot trains end to end on a small REAL shard; loss decreases.
  2. parity chain source -> features -> float model -> integer model ->
     exported bytes -> Numba runtime; integer hops must be EXACT.

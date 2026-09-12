@@ -61,15 +61,8 @@ def register_calibration(cal: CpCalibration) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SENTINEL SAFETY (rulings 15 and 29).
-#
-# ``kSkippedScore = 32002`` marks a record the relabeller SKIPPED.  It is not a
-# score and must never become a training target.  `data/labels.py` already
-# raises on it; this typed path did not, and `cp_to_u(32002, None)` returned
-# **1.0** — a perfect "sure win" label on a record carrying no information.
-# That is the exact poison ruling 15 quarantined the pipeline for, so the guard
-# lives at every public decode entry point here too, and it RAISES rather than
-# clipping: a silently clipped sentinel is indistinguishable from a real win.
+# The relabeller uses 32002 for skipped records. Reject it at every public
+# decoding boundary: clipping would turn missing supervision into a win label.
 
 SENTINEL_SKIP = 32002
 
@@ -86,8 +79,7 @@ def _reject_sentinel(cp: float) -> None:
     if is_sentinel_skip(cp):
         raise SentinelError(
             f"score {SENTINEL_SKIP} is the relabeller skip sentinel, not an "
-            "evaluation; the record must be filtered before labelling "
-            "(rulings 15, 29)"
+            "evaluation; the record must be filtered before labelling"
         )
 
 

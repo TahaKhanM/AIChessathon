@@ -16,7 +16,7 @@ from training.feature_spec import SPEC
 from training.features import FeatureEncoder
 from training.model import Batch, F512Model
 
-# kiwipete, startpos, a sparse endgame, the ruling-20 queen-loss wreck
+# kiwipete, startpos, a sparse endgame, a queen-loss regression position
 _FENS = [
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
     "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",

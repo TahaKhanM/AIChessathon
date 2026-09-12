@@ -196,7 +196,7 @@
     "neural_score_range": "bounded strictly inside mate score band; enforce after exact exported transforms",
     "hidden_activation": "concat(lin, sq) on x = affine >> hidden_affine_shift_reference: lin = clip(x, hidden_clip); sq = clip((x*x) >> square_activation_shift, hidden_clip)",
     "hidden_activation_square_operand": "unclipped_shifted_affine",
-    "hidden_activation_ruling": "was unspecified (spec 4.2 prose admits clip-then-square and square-of-unclipped readings). Decided by the pinned references for this dual-activation family: Stockfish@59aae690f91d6f69aac194f447d84b4a2c3be778 src/nnue/layers/sqr_clipped_relu.h squares the unclipped input (min(127, in*in >> (2*WeightScaleBits+7))) including its pair-activation variant, and PlentyChess@04e07a98ee6ac104c30e7374450c94b96d94ef4d nnue.cpp emits [clamp(r,0,1), min(r*r,1)]. The square is sign-blind: negative pre-activations produce a positive square channel. The clip-then-square reading is rejected; it survives only as engine/contract_b/oracle.py hidden_activation_clipped_first (divergence diagnostic).",
+    "hidden_activation_ruling": "Square the unclipped shifted affine before clipping the square output. Stockfish@59aae690f91d6f69aac194f447d84b4a2c3be778 src/nnue/layers/sqr_clipped_relu.h and PlentyChess@04e07a98ee6ac104c30e7374450c94b96d94ef4d nnue.cpp are the pinned definition references. Negative pre-activations can produce positive square-channel activations.",
     "leaf_transform": "cp = clip(((dot + psqt) * scale_num) >> scale_shift, -neural_bound, +neural_bound), computed in int64 (head.rescale_dtype); the constants are recorded in the trained export RXF1 _meta, never edited beneath existing weights",
     "leaf_transform_export_defaults": {
       "scale_num": 275,

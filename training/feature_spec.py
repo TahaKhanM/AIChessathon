@@ -217,7 +217,7 @@ def load_spec() -> FeatureSpec:
         scalar_u_log2_divisor=8,
         # Deployed leaf constants are read from the authoritative JSON
         # (numeric_contract.leaf_transform_export_defaults, added by the
-        # ruling-42 amendment — the JSON is the single source of truth).
+        # the JSON is the single source of truth).
         # Deployed score clamp: mate-in-N scores occupy [27952, 30000)
         # (engine/tt.py MATE=30000, MATE_IN_MAX=MATE-2048).  A clamped neural
         # score must never equal a mate sentinel, so score_bound is one below

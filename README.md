@@ -1,4 +1,6 @@
-# Miskeen · مسكين
+# AIChessathon
+
+[![Checks](https://github.com/TahaKhanM/AIChessathon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TahaKhanM/AIChessathon/actions/workflows/ci.yml)
 
 **2nd of 334 teams in the AI Chessathon Final Qualification · 10/13 points · University of Warwick**
 
@@ -21,8 +23,6 @@ Miskeen finished **second in the AI Chessathon Final Qualification**, the comple
 | University | **Warwick** |
 
 ![Final Qualification leaderboard after Swiss round 13: Miskeen ranks second of 334 teams with 10 points and an 8–4–1 record.](docs/assets/miskeen-final-qualification.png)
-
-*Original leaderboard screenshot supplied by the author, after all 13 Final Qualification rounds. The result belongs to Miskeen’s competition entry; this public engineering and training reference excludes its locked tournament checkpoint.*
 
 ## Technical overview
 
