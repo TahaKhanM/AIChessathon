@@ -1,0 +1,170 @@
+{
+  "bias_dtype": "int16",
+  "bias_limit": 2040,
+  "channels": 512,
+  "half_channels": 256,
+  "head": {
+    "bias_and_dot_dtype": "int32",
+    "coefficient_abs_limit": 127,
+    "coefficient_dtype": "int8",
+    "first_activation_concat": 32,
+    "first_affine_outputs": 16,
+    "input_count": 512,
+    "material_stacks": 8,
+    "outputs": [
+      "scalar",
+      "W_logit",
+      "D_logit",
+      "L_logit"
+    ],
+    "rescale_dtype": "int64",
+    "second_activation_concat": 64,
+    "second_affine_outputs": 32,
+    "skip_concat_outputs": 96,
+    "stack_selection": "min(7,max(0,(piece_count-2)//4))"
+  },
+  "king_bucket_map": [
+    [
+      0,
+      1,
+      2,
+      3,
+      3,
+      2,
+      1,
+      0
+    ],
+    [
+      4,
+      5,
+      6,
+      7,
+      7,
+      6,
+      5,
+      4
+    ],
+    [
+      8,
+      8,
+      9,
+      9,
+      9,
+      9,
+      8,
+      8
+    ],
+    [
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10,
+      10
+    ],
+    [
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11
+    ],
+    [
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11
+    ],
+    [
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11
+    ],
+    [
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11,
+      11
+    ]
+  ],
+  "king_buckets": 12,
+  "name": "RX-FINAL F512-EF-K12-16/32",
+  "numeric": {
+    "accumulator_dtype": "int16",
+    "accumulator_proven_abs_bound": 30048,
+    "cp_num": 275,
+    "cp_shift": 8,
+    "ft_operand_clip": [
+      0,
+      255
+    ],
+    "hidden_affine_shift": 6,
+    "hidden_clip": [
+      0,
+      127
+    ],
+    "mate_band_start": 27952,
+    "paired_product_max": 127,
+    "paired_product_shift": 9,
+    "scalar_u_log2_divisor": 8,
+    "score_bound": 27951,
+    "square_activation_shift": 7
+  },
+  "pawn_pairs": {
+    "coefficient_abs_limit": 31,
+    "factorizer_rows": 372,
+    "max_active_bound": 120,
+    "name": "pawn_pairs",
+    "rows": 1488,
+    "runtime_dtype": "int8",
+    "storage_bits": 6
+  },
+  "perspectives": 2,
+  "psq": {
+    "coefficient_abs_limit": 255,
+    "factorizer_rows": 768,
+    "max_active_bound": 32,
+    "name": "psq",
+    "rows": 9216,
+    "runtime_dtype": "int16",
+    "storage_bits": 9
+  },
+  "psqt_abs_limit": 32767,
+  "psqt_dtype": "int16",
+  "psqt_rows": 9216,
+  "schema_id": "94c084407a1a237b",
+  "schema_version": "rx-final-2",
+  "storage": {
+    "bit_order": "little endian within the byte stream, two-complement signed fields",
+    "default": "fixed-width signed 9/7/6-bit packing of already bounded PSQ/threat/PP integers; other arrays ordinary integer storage",
+    "raw_fallback": true
+  },
+  "threat_source_pin": "official-stockfish/Stockfish@59aae690f91d6f69aac194f447d84b4a2c3be778:src/nnue/features/full_threats.{h,cpp}",
+  "threats": {
+    "coefficient_abs_limit": 63,
+    "factorizer_rows": 59808,
+    "max_active_bound": 256,
+    "name": "threats",
+    "rows": 59808,
+    "runtime_dtype": "int8",
+    "storage_bits": 7
+  }
+}

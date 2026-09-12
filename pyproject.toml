@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chessathon-engine"
+version = "0.2.0"
+description = "Resource-constrained chess search with exact integer evaluation"
+requires-python = ">=3.12,<3.13"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+dependencies = ["chess==1.11.2", "numpy==2.5.2", "numba==0.67.0"]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "ruff==0.16.6", "build>=1.2,<2"]
+
+[tool.setuptools]
+py-modules = ["agent"]
+
+[tool.setuptools.packages.find]
+include = ["engine*"]
+
+[tool.setuptools.package-data]
+"engine.clock_b" = ["horizon_table.json"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--strict-markers --strict-config -m 'not slow'"
+markers = ["slow: exhaustive high-depth perft checks (hundreds of millions of leaves)"]

@@ -1,0 +1,479 @@
+{
+  "name": "RX-FINAL F512-EF-K12-16/32",
+  "status": "untrained reference build specification",
+  "release_selection": "Select a single fully trained, tuned, qualified complete package; challengers are mandatory experiments, not simultaneously active runtime models.",
+  "deployment": {
+    "python": "3.12",
+    "core_count": 1,
+    "cpu": "AMD EPYC 9V74 as specified by organisers",
+    "ram_limit_description": "2 GB; verify actual cgroup limit",
+    "unpacked_package_limit_bytes": 50000000,
+    "init_budget_seconds": 90,
+    "base_seconds_per_side": 120,
+    "increment_seconds_per_legal_move": 0.5,
+    "absolute_ply_draw_cap": 600,
+    "tmp_limit_description": "256 MB",
+    "network": false,
+    "gpu": false,
+    "opponent_turn_suspended": true
+  },
+  "search": {
+    "family": "original Numba iterative-deepening PVS",
+    "tt_default_mib": 128,
+    "tt_sweep_mib": [
+      64,
+      128,
+      256,
+      512
+    ],
+    "neural_leaf_functions": 1,
+    "learned_ordering_default": false,
+    "root_transformer_default": false,
+    "dynamic_contempt_default": false,
+    "hard_clock": "monotonic wall time",
+    "score_context": "raw eval, corrections, bound/depth, model/utility version, rule50/horizon and history qualification are separate"
+  },
+  "features": {
+    "perspectives": 2,
+    "shared_transform_tables": true,
+    "channels": 512,
+    "fusion": "sum PSQ, filtered threats, and compact pawn pairs before paired activation",
+    "psq": {
+      "king_buckets": 12,
+      "rows": 9216,
+      "runtime_dtype": "int16",
+      "coefficient_abs_limit": 255,
+      "lossless_storage_bits": 9,
+      "king_bucket_map_by_rank_from_perspective_home_rank": [
+        [
+          0,
+          1,
+          2,
+          3,
+          3,
+          2,
+          1,
+          0
+        ],
+        [
+          4,
+          5,
+          6,
+          7,
+          7,
+          6,
+          5,
+          4
+        ],
+        [
+          8,
+          8,
+          9,
+          9,
+          9,
+          9,
+          8,
+          8
+        ],
+        [
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10
+        ],
+        [
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11
+        ],
+        [
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11
+        ],
+        [
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11
+        ],
+        [
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11,
+          11
+        ]
+      ]
+    },
+    "threats": {
+      "rows": 59808,
+      "runtime_dtype": "int8",
+      "coefficient_abs_limit": 63,
+      "lossless_storage_bits": 7,
+      "max_active_bound": 256,
+      "definition_revision": "official-stockfish/Stockfish@59aae690f91d6f69aac194f447d84b4a2c3be778:src/nnue/features/full_threats.{h,cpp}"
+    },
+    "pawn_pairs": {
+      "rows": 1488,
+      "runtime_dtype": "int8",
+      "coefficient_abs_limit": 31,
+      "lossless_storage_bits": 6,
+      "max_active_bound": 120,
+      "definition": "96 relative-color pawn identities on ranks 2..7; unordered pairs on distinct physical squares; file distance <=1; dense map ordered by b*(b-1)//2+a",
+      "not_claimed_identical_to_every_upstream_PP_encoding": true
+    },
+    "bias": {
+      "runtime_dtype": "int16",
+      "coefficient_abs_limit": 2040,
+      "lossless_storage_bits": 16
+    },
+    "accumulator": {
+      "dtype": "int16",
+      "proven_abs_bound": 30048,
+      "int32_unconstrained_challenger": true,
+      "fold_before_range_check": true,
+      "intermediate_update_safety_required": true
+    }
+  },
+  "head": {
+    "material_stacks": 8,
+    "selection": "min(7,max(0,(piece_count-2)//4))",
+    "input_count": 512,
+    "first_affine_outputs": 16,
+    "first_activation_concat": 32,
+    "second_affine_outputs": 32,
+    "second_activation_concat": 64,
+    "skip_concat_outputs": 96,
+    "outputs": [
+      "scalar",
+      "W_logit",
+      "D_logit",
+      "L_logit"
+    ],
+    "coefficient_dtype": "int8",
+    "bias_and_dot_dtype": "int32",
+    "rescale_dtype": "int64",
+    "scalar_only_runtime_allowed": true,
+    "psqt": "separate piece-square-only 9216 x 8 int16 skip with 8 int32 biases"
+  },
+  "numeric_contract": {
+    "ft_operand_clip": [
+      0,
+      255
+    ],
+    "paired_product_shift": 9,
+    "paired_product_max": 127,
+    "hidden_clip": [
+      0,
+      127
+    ],
+    "hidden_affine_shift_reference": 6,
+    "square_activation_shift": 7,
+    "rounding": "explicit versioned deterministic floor shifts; fake-quant/reference/runtime must match",
+    "output_scales": "all scale factors, PSQT exponent and calibrated search-score transform fixed in the trained export; no claim an untrained final calibration has been measured",
+    "neural_score_range": "bounded strictly inside mate score band; enforce after exact exported transforms",
+    "hidden_activation": "concat(lin, sq) on x = affine >> hidden_affine_shift_reference: lin = clip(x, hidden_clip); sq = clip((x*x) >> square_activation_shift, hidden_clip)",
+    "hidden_activation_square_operand": "unclipped_shifted_affine",
+    "hidden_activation_ruling": "was unspecified (spec 4.2 prose admits clip-then-square and square-of-unclipped readings). Decided by the pinned references for this dual-activation family: Stockfish@59aae690f91d6f69aac194f447d84b4a2c3be778 src/nnue/layers/sqr_clipped_relu.h squares the unclipped input (min(127, in*in >> (2*WeightScaleBits+7))) including its pair-activation variant, and PlentyChess@04e07a98ee6ac104c30e7374450c94b96d94ef4d nnue.cpp emits [clamp(r,0,1), min(r*r,1)]. The square is sign-blind: negative pre-activations produce a positive square channel. The clip-then-square reading is rejected; it survives only as engine/contract_b/oracle.py hidden_activation_clipped_first (divergence diagnostic).",
+    "leaf_transform": "cp = clip(((dot + psqt) * scale_num) >> scale_shift, -neural_bound, +neural_bound), computed in int64 (head.rescale_dtype); the constants are recorded in the trained export RXF1 _meta, never edited beneath existing weights",
+    "leaf_transform_export_defaults": {
+      "scale_num": 275,
+      "scale_shift": 8,
+      "neural_bound": 27951,
+      "neural_bound_basis": "MATE_IN_MAX - 1 = mate_band_start - 1: strictly inside the mate band [27952, 30000)"
+    }
+  },
+  "storage": {
+    "default": "fixed-width signed 9/7/6-bit packing of already bounded PSQ/threat/PP integers; other arrays ordinary integer storage",
+    "bit_order": "little endian within the byte stream, two-complement signed fields",
+    "startup": "decode once to normal runtime dtypes; hash and range check; warm selected kernels",
+    "quality_claim": "lossless relative to the same bounded integer model, NOT relative to an unconstrained model",
+    "runtime_effect": "no change to expanded rows or arithmetic; startup and peak RSS still require qualification",
+    "raw_fallback": true
+  },
+  "reference_raw_accounting": {
+    "psq_bytes": 9437184,
+    "threat_bytes": 30621696,
+    "pawn_pair_bytes": 761856,
+    "routing_bytes": 0,
+    "head_weight_bytes": 76800,
+    "head_bias_bytes": 1664,
+    "transform_bias_bytes": 1024,
+    "psqt_bytes": 147488,
+    "numeric_payload_bytes": 41047712,
+    "scalar_dense_head_macs": 9312,
+    "excludes": [
+      "header",
+      "alignment",
+      "optional encoder maps",
+      "source",
+      "book",
+      "tablebases"
+    ]
+  },
+  "reference_packed_accounting": {
+    "psq_bytes": 5308416,
+    "threat_bytes": 26793984,
+    "pawn_pair_bytes": 571392,
+    "routing_bytes": 0,
+    "head_weight_bytes": 76800,
+    "head_bias_bytes": 1664,
+    "transform_bias_bytes": 1024,
+    "psqt_bytes": 147488,
+    "numeric_payload_bytes": 32900768,
+    "scalar_dense_head_macs": 9312,
+    "excludes": [
+      "header",
+      "alignment",
+      "optional encoder maps",
+      "source",
+      "book",
+      "tablebases"
+    ]
+  },
+  "reference_packed_package_reservations": {
+    "evaluator_bytes": 33500000,
+    "source_and_notices_bytes": 1500000,
+    "book_bytes_up_to": 10000000,
+    "dependency_closed_tablebase_bytes_up_to": 4000000,
+    "total_reserved_bytes": 49000000,
+    "unreserved_margin_bytes": 1000000,
+    "actual_asset_allocation_requires_games": true
+  },
+  "reference_raw_fallback_reservations": {
+    "evaluator_bytes": 42000000,
+    "source_bytes": 1500000,
+    "book_bytes_up_to": 4000000,
+    "tablebase_bytes_up_to": 2000000,
+    "total_reserved_bytes": 49500000
+  },
+  "principal_challengers": [
+    {
+      "name": "F384 dense early",
+      "accounting_raw": {
+        "psq_bytes": 7077888,
+        "threat_bytes": 22966272,
+        "pawn_pair_bytes": 571392,
+        "routing_bytes": 0,
+        "head_weight_bytes": 60416,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 768,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 30825888,
+        "scalar_dense_head_macs": 7264,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      },
+      "accounting_packed": {
+        "psq_bytes": 3981312,
+        "threat_bytes": 20095488,
+        "pawn_pair_bytes": 428544,
+        "routing_bytes": 0,
+        "head_weight_bytes": 60416,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 768,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 24715680,
+        "scalar_dense_head_macs": 7264,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      }
+    },
+    {
+      "name": "F640 dense early",
+      "accounting_raw": {
+        "psq_bytes": 11796480,
+        "threat_bytes": 38277120,
+        "pawn_pair_bytes": 952320,
+        "routing_bytes": 0,
+        "head_weight_bytes": 93184,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 1280,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 51269536,
+        "scalar_dense_head_macs": 11360,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      },
+      "accounting_packed": {
+        "psq_bytes": 6635520,
+        "threat_bytes": 33492480,
+        "pawn_pair_bytes": 714240,
+        "routing_bytes": 0,
+        "head_weight_bytes": 93184,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 1280,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 41085856,
+        "scalar_dense_head_macs": 11360,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      }
+    },
+    {
+      "name": "F768 dense early",
+      "accounting_raw": {
+        "psq_bytes": 14155776,
+        "threat_bytes": 45932544,
+        "pawn_pair_bytes": 1142784,
+        "routing_bytes": 0,
+        "head_weight_bytes": 109568,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 1536,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 61491360,
+        "scalar_dense_head_macs": 13408,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      },
+      "accounting_packed": {
+        "psq_bytes": 7962624,
+        "threat_bytes": 40190976,
+        "pawn_pair_bytes": 857088,
+        "routing_bytes": 0,
+        "head_weight_bytes": 109568,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 1536,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 49270944,
+        "scalar_dense_head_macs": 13408,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      },
+      "note": "packed bounded profile still exceeds 50M after ordinary source allocation"
+    },
+    {
+      "name": "F768 learned int4 threat, exact9bit PSQ and6bit PP",
+      "accounting": {
+        "psq_bytes": 7962624,
+        "threat_bytes": 22966272,
+        "pawn_pair_bytes": 857088,
+        "routing_bytes": 0,
+        "head_weight_bytes": 109568,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 1536,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 32046240,
+        "scalar_dense_head_macs": 13408,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      },
+      "note": "int4 is a lossy/QAT-trained representation; branch scale metadata excluded and must be counted"
+    },
+    {
+      "name": "B768 blocked early",
+      "channels": 768,
+      "threat_channels_per_row": 128,
+      "routing": "6 fixed blocks of64 paired indices; offline fixed one-byte route per threat; write both pair halves",
+      "accounting_raw": {
+        "psq_bytes": 14155776,
+        "threat_bytes": 7655424,
+        "pawn_pair_bytes": 1142784,
+        "routing_bytes": 59808,
+        "head_weight_bytes": 109568,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 1536,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 23274048,
+        "scalar_dense_head_macs": 13408,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      },
+      "accounting_packed": {
+        "psq_bytes": 7962624,
+        "threat_bytes": 6698496,
+        "pawn_pair_bytes": 857088,
+        "routing_bytes": 59808,
+        "head_weight_bytes": 109568,
+        "head_bias_bytes": 1664,
+        "transform_bias_bytes": 1536,
+        "psqt_bytes": 147488,
+        "numeric_payload_bytes": 15838272,
+        "scalar_dense_head_macs": 13408,
+        "excludes": [
+          "header",
+          "alignment",
+          "optional encoder maps",
+          "source",
+          "book",
+          "tablebases"
+        ]
+      },
+      "note": "new hypothesis, not trained or measured"
+    },
+    {
+      "name": "prior H1024 R128 P64 late fusion",
+      "role": "matched-data, adequately converged control with its own exact encoder and head"
+    }
+  ]
+}

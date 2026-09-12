@@ -1,0 +1,36 @@
+# Local environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.nbc
+*.nbi
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.DS_Store
+
+# Credentials and private operational files
+.env
+.env.*
+*.local.*
+resources.local.json
+*.key
+*.pem
+openrc.sh
+
+# Generated models, datasets and results
+models/
+checkpoints/
+dist/
+build/
+bench/results/
+*.zip
+*.pt
+*.pth
+*.onnx
+*.npy
+*.npz

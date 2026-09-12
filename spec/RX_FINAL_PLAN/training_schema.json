@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RX-FINAL source-grounded training record",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "record_id",
+    "position",
+    "source",
+    "observations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rx-final-1"
+    },
+    "record_id": {
+      "type": "string"
+    },
+    "position": {
+      "type": "object",
+      "required": [
+        "fen4",
+        "variant",
+        "halfmove_clock",
+        "fullmove_number",
+        "history_complete",
+        "unknown_prefix"
+      ],
+      "properties": {
+        "fen4": {
+          "type": "string",
+          "description": "Pieces, side, castling and EP only; canonical legal EP equivalence kept separately if used for hashing"
+        },
+        "variant": {
+          "enum": [
+            "standard",
+            "chess960",
+            "other"
+          ]
+        },
+        "halfmove_clock": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "fullmove_number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "absolute_ply": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "history_complete": {
+          "type": "boolean"
+        },
+        "unknown_prefix": {
+          "type": "boolean"
+        },
+        "observed_reversible_history_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "known_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "chosen_relabel_context": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Explicitly artificial/new context used for new teacher labels, never silently attached to inherited labels"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "corpus",
+        "object_sha256",
+        "decoder_revision",
+        "lineage_family",
+        "original_position_id"
+      ],
+      "properties": {
+        "corpus": {
+          "type": "string"
+        },
+        "object_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "decoder_revision": {
+          "type": "string"
+        },
+        "original_game_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_position_id": {
+          "type": "string"
+        },
+        "lineage_family": {
+          "type": "string"
+        },
+        "licence_record_id": {
+          "type": "string"
+        },
+        "derivation_chain": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "split_group": {
+          "type": "string"
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "perspective",
+          "score_kind",
+          "bound_kind",
+          "context_known"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "direct_neural",
+              "searched",
+              "action_searched",
+              "game_outcome",
+              "tablebase",
+              "policy_visits",
+              "counterfactual"
+            ]
+          },
+          "perspective": {
+            "enum": [
+              "white",
+              "black",
+              "side_to_move",
+              "parent_side_to_move"
+            ]
+          },
+          "score_kind": {
+            "enum": [
+              "cp",
+              "mate",
+              "wdl",
+              "expected_score",
+              "interval",
+              "visits",
+              "outcome",
+              "operation_result"
+            ]
+          },
+          "bound_kind": {
+            "enum": [
+              "none",
+              "search_exact",
+              "lower",
+              "upper",
+              "interval",
+              "unknown"
+            ]
+          },
+          "context_known": {
+            "type": "boolean"
+          },
+          "cp": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "mate_plies": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "wdl": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "expected_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "raw_payload": {
+            "type": [
+              "object",
+              "string",
+              "null"
+            ]
+          },
+          "teacher_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Resolves engine revision, network checksum, config, WDL scale and budget semantics in teacher manifest"
+          },
+          "nodes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "depth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "uncached_neural_evaluations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "elapsed_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "parent_record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action_uci": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "termination": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "interrupted": {
+            "type": "boolean"
+          },
+          "right_censored": {
+            "type": "boolean"
+          },
+          "calibration_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "legal_actions_enumerated": {
+      "type": "boolean"
+    },
+    "split": {
+      "enum": [
+        "train",
+        "development",
+        "sealed",
+        "quarantine"
+      ]
+    }
+  },
+  "semantic_checks_not_expressible_here": [
+    "WDL sums to one within explicitly fixed tolerance; class order W,D,L is mandatory",
+    "Mate units and POV verified against source golden cases; CP is not probability",
+    "Missing counters remain null; fresh relabel contexts create separate observations",
+    "UCI lower/upper bound targets are not point regression labels",
+    "search_exact is not a proof of game-theoretic exactness",
+    "Child-to-parent expected score converts to1-u; W/L swap; do not merely negate a probability",
+    "Original and relabelled or neighbouring records share split groups",
+    "Orthodox-only consumers reject/route variant records explicitly",
+    "Observed histories are not padded with fabricated actual repetitions",
+    "Unsearched actions are not negative labels; interrupted trials are censored",
+    "Game outcomes preserve resignation/adjudication/clock/terminal provenance"
+  ]
+}
