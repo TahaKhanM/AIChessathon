@@ -6,6 +6,6 @@ Keep each commit focused on one reviewable change. Describe the observable behav
 
 For engine changes, check state restoration, draw semantics and abort paths. For numerical changes, preserve exact rounding and export/runtime parity. For data changes, check label perspective and split leakage. Never commit credentials, checkpoints, generated datasets or provider inventories.
 
-The root adapter is intentionally a weights-free baseline. A neural model release needs its own provenance, checksums and complete-package qualification. No new training programme is planned for this repository.
+The root adapter is intentionally a weights-free baseline. A neural model release needs its own provenance, checksums and complete-package qualification. The README documents the retained CPU reference trainer for reproducible user experiments.
 
 The public history starts with a curated source import. Subsequent commits record actual maintenance work; earlier experimental chronology is not reconstructed.
