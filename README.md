@@ -1,165 +1,200 @@
-# AIChessathon
+# Miskeen | AI Chessathon
 
 [![Checks](https://github.com/TahaKhanM/AIChessathon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TahaKhanM/AIChessathon/actions/workflows/ci.yml)
 
-**2nd of 334 teams in the AI Chessathon Final Qualification · 10/13 points · University of Warwick**
+**2nd out of 314+ teams in the Global AI Chessathon Final Qualification**
 
-A Python/Numba chess engine combining **principal variation search, incremental integer neural evaluation and explicit runtime resource management**. The repository includes a runnable baseline, a CPU training pipeline, versioned model exports, differential correctness tests and reproducible benchmarks.
+I built Miskeen for a simple question: how strong a chess engine could I make when the deployed agent gets one CPU core, 2 GB of RAM, no network, no GPU and a 50 MB package limit?
 
-The engineering focus is the interaction between model accuracy and execution cost: search selectivity, memory layout, cache reuse, quantization, cancellation and reproducible evaluation under a fixed clock.
+The answer ended up being much more of a systems problem than a model-size problem. By v4, Miskeen combined a custom Numba-compiled bitboard engine, selective principal variation search, an incrementally updated NNUE-style evaluator that I trained from scratch, and a training and evaluation pipeline built around the actual competition clock.
 
-[Architecture](#technical-overview) · [Quickstart](#install-and-choose-a-move) · [Training](#train-your-own-evaluator) · [Verification](#verify-and-measure)
+The part I found most interesting was the trade-off between **decision quality and cost**. A better evaluator is not better if it makes search too slow. A pruning rule is not useful if it saves nodes by deleting the wrong branch. A model that looks better offline is not a stronger chess engine until the complete packaged agent wins under the real runtime constraints.
 
-## Competition result
+This repository is the cleaned public release of that work. The tournament checkpoint, private training data and historical match outputs are intentionally not included.
 
-Miskeen finished **second in the AI Chessathon Final Qualification**, the completed 13-round Swiss that selected participants for the London final.
+## At a glance
 
-| Final qualification standing | Result |
-|---|---:|
-| Rank | **2 / 334 teams** |
-| Points | **10.0 / 13** |
-| Wins / draws / losses | **8 / 4 / 1** |
-| Buchholz | **116.5** |
-| University | **Warwick** |
+| Area | v4 approach |
+|---|---|
+| Search | Iterative-deepening PVS / alpha-beta with aspiration, quiescence, transposition-table reuse and selective pruning |
+| State | Custom bitboards, reversible make/unmake, repetition and draw context, legal root fallback |
+| Evaluation | Dual-perspective sparse NNUE, 16 king buckets, SCReLU hidden layer, piece-count output buckets |
+| Runtime | Numba hot path, preallocated NumPy storage, incremental integer accumulators, explicit deadline handling |
+| Training | Own teacher-labelled positions + public Lichess evaluations, quantization-aware training and held-out splits |
+| Validation | Paired full-engine games at the competition clock, target-CPU checks and package-level qualification |
 
-![Final Qualification leaderboard after Swiss round 13: Miskeen ranks second of 334 teams with 10 points and an 8–4–1 record.](docs/assets/miskeen-final-qualification.png)
+## Why the constraints mattered
 
-## Technical overview
+The competition runtime was deliberately tight:
 
-The engine combines iterative-deepening principal variation search with a sparse, incrementally updated integer evaluator. Python provides an inspectable reference path; Numba kernels provide a separate compiled search backend and optimized evaluation. The runnable root adapter uses a classical material/piece-square evaluator, so a fresh clone can choose moves immediately without a model download.
+- one AMD EPYC CPU core
+- 2 GB RAM
+- no network and no GPU during play
+- Python 3.12 with NumPy and Numba available
+- 50 MB maximum unpacked submission
+- 120 seconds plus 0.5 seconds per move
 
-| Systems problem | Design | Implementation |
-|---|---|---|
-| Deadline-constrained decision making | Soft iteration budgets, monotonic hard deadlines, legal fallback, completed-iteration commit | [`search.py`](engine/search.py), [`clock.py`](engine/clock.py) |
-| Stateful computation with cancellation | Reversible board updates and transactional evaluator push/pop | [`board.py`](engine/board.py), [`evaluate.py`](engine/evaluate.py) |
-| Path-dependent value | Separate geometric identity, rule counters, repetition history and model/utility context | [`state.py`](engine/state.py), [`tt.py`](engine/tt.py) |
-| Batch-one inference cost | Shared 512-channel sparse transform, incremental deltas and perspective refreshes | [`features.py`](engine/features.py), [`evaluate.py`](engine/evaluate.py) |
-| Exact deployment semantics | Quantization-aware forward arithmetic, explicit widening, clipping and floor shifts | [`model.py`](training/model.py), [`int_eval.py`](training/int_eval.py) |
-| Artifact size and loading peaks | Signed 9/7/6-bit packing, bounded chunked decoding, versioned hash-checked containers | [`model_io.py`](engine/model_io.py) |
-| Statistical leakage and label ambiguity | Grouped splits, canonical board keys, provenance, bounds and censoring semantics | [`splits.py`](training/splits.py), [`labels.py`](training/labels.py) |
-| Reproducible measurement | Fixed positions, fresh transposition tables, source fingerprints and per-sample metadata | [`bench/run.py`](bench/run.py) |
+That changes how you design the engine. I could not treat search, inference, memory layout and time management as separate problems. Every feature had to earn the CPU time and bytes it consumed.
 
-The optimization target is **expected game score under the complete runtime budget**. Evaluation accuracy affects the quality of leaf estimates; inference cost affects how many useful branches can be searched; selectivity and move ordering determine where that work is spent. Experiments therefore need both statistical controls over the position distribution and operational measurements of the complete engine.
+For me, that was the core of the project: **optimising expected playing strength per unit of runtime rather than optimising any single benchmark in isolation.**
 
-### Search and state
+## v4 architecture
+
+During the final development window, the stable v4 line used a K16 NNUE with a direct H1024 SCReLU head on top of the search engine. The exact locked tournament checkpoint is not distributed here, but the architecture and development process are described below.
 
 ```mermaid
-flowchart TD
-    A[FEN and remaining clock] --> B[Parse and establish legal fallback]
-    B --> C[Reconcile observed game history]
-    C --> D[Iterative deepening and principal variation search]
-    D <--> E[Context-qualified transposition table]
-    D <--> F[Make/unmake and incremental evaluation]
-    G[Monotonic hard deadline] --> D
-    D --> H[Commit completed iteration]
-    H --> I[Recheck legality and return UCI]
+flowchart LR
+    A[FEN + remaining clock] --> B[Bitboard state + history]
+    B --> C[Iterative deepening PVS]
+    C <--> D[Transposition table]
+    C <--> E[Make / unmake]
+    E <--> F[Incremental NNUE accumulators]
+    F --> G[Integer evaluation]
+    G --> C
+    H[Soft budget + hard deadline] --> C
+    C --> I[Last completed iteration]
+    I --> J[Legal UCI move]
 ```
 
-The search implements aspiration windows, quiescence, history-based ordering, late-move reductions, null-move pruning and verification mechanisms. These selective estimates remain heuristics. A reduced search does not become an exact minimax bound merely because its static evaluation is confident.
+### Search
 
-Three details matter at the systems boundary:
+The searcher is an iterative-deepening principal variation search built on alpha-beta. Quiescence handles unstable tactical leaves, while aspiration windows and move ordering try to make the useful branch fail high as early as possible.
 
-- **Cancellation is transactional.** An interrupted iteration must restore board and evaluator state without replacing the last completed principal variation.
-- **Position equality is insufficient for score reuse.** A legal transposition-table move hint can remain useful when repetition history or draw counters invalidate its cached score.
-- **Missing history remains unknown.** The interface supplies FEN observations rather than a complete game record. The engine reconciles legal endpoints and represents an unknown prefix explicitly; it does not invent repetition evidence.
+The competition-era search also used a selective stack around that core, including transposition-table cutoffs and static-eval reuse, verified null-move pruning, reverse futility and razoring, internal iterative reduction, late-move reductions and pruning, static exchange evaluation, history-based ordering and a small number of targeted extensions.
 
-Null moves belong to the search tree, not to played history. Mate scores, legal-game plies and the absolute game horizon are handled separately.
+I deliberately treated these as heuristics rather than correctness rules. Reduced searches can be wrong. Cached scores can become unsafe when draw context changes. Null moves belong to the search tree, not the played game history. The engine therefore separates move-ordering hints from score reuse and keeps enough game context to avoid treating every geometrically identical board as equivalent.
 
-### Transposition-table layout and reuse semantics
+The other non-negotiable part was cancellation. Before expensive work starts, the engine already has a legal fallback. It only publishes a principal variation from a fully completed iteration. If the hard deadline fires halfway through the next depth, board state and evaluator state unwind together and the previous result survives.
 
-The transposition table packs each entry into **two 64-bit words** and groups four entries into a **64-byte cluster**. At a 128 MiB table allocation, this provides 8,388,608 entry slots; the public baseline and README examples use smaller 8 MiB tables.
+The public reference implementation lives in [`engine/search.py`](engine/search.py), [`engine/state.py`](engine/state.py), [`engine/tt.py`](engine/tt.py) and [`engine/board.py`](engine/board.py).
 
-| Packed field group | Information retained |
-|---|---|
-| Identity and ordering | 32-bit position tag, 15-bit move, search depth, bound type and generation |
-| Search evidence | Signed 16-bit search score and raw static evaluation |
-| Value context | Halfmove clock, horizon band, model version and utility version |
-| Repetition context | Repetition-count band and unknown-history-prefix flag |
+### NNUE evaluation
 
-Probe logic separates **move ordering**, **raw evaluation reuse** and **score cutoffs**. A stored lower or upper bound is useful for pruning only when depth, search window and context checks permit it. Mate scores are normalized on storage and adjusted for the probing ply. Online correction history is applied to the raw evaluation by the searcher rather than permanently folded into the cached value.
+The v4 evaluator was designed for the workload a chess search actually creates: batch size one, millions of closely related positions and a very small latency budget per leaf.
 
-Production reuse uses declared approximations, including repetition and horizon bands. The separate `StrictTable` audit oracle keys scores by exact counters and a fingerprint of the complete known reversible history. Counterfactual-history tests compare those policies on positions with identical geometry but different draw implications. See [`engine/tt.py`](engine/tt.py) and [`tests/test_tt.py`](tests/test_tt.py).
+For each perspective, the network used **16 king buckets × 768 piece-square features**, giving a sparse 12,288-row feature space. Active rows were accumulated into a hidden layer and updated incrementally as moves were made and unmade rather than rebuilt from scratch at every node.
 
-### Compiled execution and memory layout
-
-The compiled backend represents mutable state as fixed-offset regions in preallocated, dtype-specific NumPy arrays:
+The v4 line used:
 
 ```text
-ctx = (uint64, int64, int32, int16, int8, uint8, uint32, transposition_table)
-          │
-          └─ board state · per-ply moves · search stack · histories
-             accumulator stack · model tables · clock state
+sparse king-relative piece-square features
+        ↓
+white and black perspective accumulators
+        ↓
+H1024 SCReLU hidden transform
+        ↓
+8 piece-count / material output buckets
+        ↓
+integer scalar evaluation
 ```
 
-Move buffers and search stacks are addressed by ply and offset, keeping Python objects out of the recursive Numba hot path. Weight regions sit at the ends of their arrays so earlier offsets remain constant across configurations. Since array length is not part of Numba's array type, the context can retain the same type signature for classical and neural evaluation configurations.
+Weights and accumulators were integer-valued at runtime, with widened reductions where needed. The point was not simply to make the network small. It was to make the network cheap enough that better positional information still translated into useful search depth.
 
-The native monotonic-clock bridge lets compiled search poll a hard deadline without returning to the Python driver at every node. Each backend keeps deadline arithmetic within its own clock domain. Poll frequency and unwind margins determine stopping latency, while the soft allocator decides whether to start another iteration.
+One of the most useful performance lessons came from something much less glamorous than the model architecture. A multidimensional indexing pattern in the neural hot loop stopped LLVM from vectorising the dot product effectively on the target EPYC. Reworking the same computation around contiguous one-dimensional row views removed that bottleneck without changing the model at all. That kind of profiling-driven change became a recurring theme in v4.
 
-Compilation and cache loading are tested as distinct lifecycle events. A two-process regression first builds a fresh cache and then loads it in another process, exercising recursive search specializations and node-limit aborts. This catches unresolved compiled-call references that a same-process smoke test would miss. See [`layout.py`](engine/kernels/layout.py), [`nclock.py`](engine/kernels/nclock.py) and the [cache regression](tests/test_kernels_segload.py).
+The public tree now contains a later experimental integer evaluator under [`engine/evaluate.py`](engine/evaluate.py) and [`spec/RX_FINAL_PLAN/`](spec/RX_FINAL_PLAN/). **That F512/K12 design is post-competition research and should not be confused with the K16 v4 network described above.**
 
-### F512-EF-K12-16/32 evaluator
+### Training pipeline
 
-For each perspective, active piece-square, occupied-square threat and compact pawn-pair rows are added into the **same 512-channel accumulator before nonlinear interaction**.
+I trained the shipped network rather than starting from public pretrained chess weights.
 
-| Feature family | Rows | Channels | Runtime coefficient type | Packed width |
-|---|---:|---:|---|---:|
-| King-relative piece-square | 9,216 | 512 | `int16` | 9 bits |
-| Filtered occupied-square threats | 59,808 | 512 | `int8` | 7 bits |
-| Compact pawn pairs | 1,488 | 512 | `int8` | 6 bits |
+The v4 data pipeline mixed two useful distributions:
 
-The transform uses **12 non-uniform king buckets** and two normalized perspectives. Piece changes update active rows; a king-frame change refreshes the affected perspective. The schema bounds accumulator magnitude by **30,048** under its coefficient and active-feature limits.
+- positions generated offline and labelled by a strong teacher engine
+- the public CC0 Lichess evaluation database, which added deeper evaluations from human-game positions
 
-```text
-Two perspective accumulators: int16[512]
-    │ split into two 256-channel halves
-    │ clip each operand to [0, 255], widen, multiply, shift right by 9
-    ▼
-256 activations per perspective, concatenated as side-to-move then opponent
-    ▼
-512 → 16 affine → 32 linear/squared activations
-    ▼
- 32 → 32 affine → 64 linear/squared activations
-    ▼
-Concatenate 32 + 64 → 96 → scalar value + auxiliary W/D/L logits
-    + incrementally accumulated piece-square linear skip
-```
+By the later v4 experiments the pipeline was operating at roughly billion-record scale. Data generation, conversion, training and match evaluation ran as separate stages so I could change one variable without silently changing the rest of the experiment.
 
-One of eight heads is selected by `min(7, max(0, (piece_count - 2) // 4))`. The scalar head path requires **9,312 dense multiply-accumulates**, excluding feature maintenance and the skip path. It need not compute WDL logits at every leaf.
+The training loop moved from floating-point optimisation into a quantization-aware phase before export. The important contract was not just low training loss. The quantized training forward pass, exported coefficients and integer runtime had to agree on clipping, widening, shifts and activation order.
 
-Arithmetic is part of the model specification. For a hidden affine output `z`, let `x = z >> 6`; the branches are `clip(x, 0, 127)` and `clip((x*x) >> 7, 0, 127)`. The square is taken **before clipping x**, including for negative x. Widening and arithmetic right shifts must agree across training, scalar reference and compiled runtime.
+I also kept provenance and split identity with the records. Positions from the same underlying source or parent group were kept together where needed so that validation did not become a disguised duplicate of training.
 
-The packed numerical payload is **32,900,768 bytes**, before container metadata and engine source. Packed storage, decoded arrays and initialization peak RSS are separate budgets. See the [machine-readable contract](spec/RX_FINAL_PLAN/architecture.json) and [architecture notes](docs/architecture.md).
+The cleaned public pipeline is under [`training/`](training/). It is intentionally a reference implementation rather than a copy of the private competition training corpus.
 
-### Incremental evaluation and export integrity
+### Time and memory management
 
-For perspective `p`, the feature transform is a sparse sum:
+Time control affected search policy directly. A soft allocator estimated whether another iteration was worth starting, while a monotonic hard deadline existed to guarantee enough time to unwind and return a legal move.
 
-```text
-a_p = bias + Σ W_psq[row] + Σ W_threat[row] + Σ W_pawn_pair[row]
-```
+The Numba backend stores recursive state in fixed-layout typed arrays instead of Python objects in the hot path. Move buffers, search stacks, histories, transposition-table storage and evaluator state are allocated ahead of time so runtime behaviour is much more predictable.
 
-A full refresh costs work proportional to the number of active rows times the 512-channel width. Incremental updates instead apply removed and added rows, with cost proportional to the changed feature set. Captures, promotions, castling and en passant require their corresponding geometry changes; king-frame transitions require perspective refreshes. Push/pop state ties accumulator lifetime to reversible board updates.
+This was also why I tested the complete package rather than just functions in isolation. Import time, JIT compilation, model loading, resident memory and worst-case stopping latency all count when the referee can lose the game for a timeout, crash or illegal move.
 
-RXF1 stores a little-endian header, bounded JSON metadata and ordered coefficient sections. Signed fields use two's-complement packing with explicit bit order and terminal padding. A SHA-256 digest covers metadata and payload; the loader also validates dimensions, coefficient ranges and format identity. Decoding proceeds in bounded chunks so temporary unpacking arrays do not scale to the entire model payload at once.
+See [`engine/kernels/`](engine/kernels/) and [`engine/clock_b/`](engine/clock_b/) for the public runtime work.
 
-The verification chain compares the quantized training forward pass, scalar integer reference, serialized export and Numba runtime. It tests exact outputs rather than a floating-point tolerance that could conceal rounding or activation-order differences. The [packing oracle](spec/RX_FINAL_PLAN/signed_packing_reference.py) provides an independent scalar implementation for codec comparisons.
+## How I got to v4
 
-## Install and choose a move
+v4 was not built by adding every chess-engine technique I could find. It came from repeatedly freezing a working baseline, changing one thing and then asking whether the whole engine was actually better.
 
-Use **CPython 3.12**. From the repository root:
+### 1. Start with a correct engine
+
+The early versions focused on bitboards, legal move generation, make/unmake, terminal rules and a classical evaluator. This gave me a trustworthy search harness before adding a neural model.
+
+That order mattered. A faster evaluator cannot rescue broken repetition state, and a stronger search cannot rescue an engine that occasionally fails to restore its board after an interrupted branch.
+
+### 2. Move the recursive hot path into Numba
+
+Once the engine was correct enough to profile, Python overhead was the obvious constraint. I moved the search-critical data structures into typed NumPy arrays and compiled the recursive path with Numba.
+
+I kept a slower reference path alongside it. That made it possible to compare optimised code against an independent implementation instead of debugging two moving targets at once.
+
+### 3. Replace hand-written evaluation with a sparse neural model
+
+The first neural versions proved that representation quality could repay some of the lost node rate, but they also exposed how expensive the wrong head architecture could be.
+
+The v4 family simplified the dense path and put more capacity into a sparse H-sized transform. The direct SCReLU head was easier to make fast, easier to quantize and better matched to the single-position inference pattern of alpha-beta search.
+
+### 4. Scale the data, not just the width
+
+I built an offline generation pipeline, added public Lichess evaluations and trained multiple widths and schedules. A useful lesson was that apparently obvious upgrades were not automatically upgrades: making the network wider, training for longer or bolting on another standard search heuristic could improve a local metric without improving the complete engine.
+
+The changes that survived were the ones that held up when search cost and data distribution were included in the experiment.
+
+### 5. Make training and runtime agree exactly
+
+Quantization initially created a gap between the model being optimised and the arithmetic being deployed. v4 introduced quantization-aware fine-tuning and explicit parity checks so I could reason about one model rather than a floating-point model and a slightly different integer one.
+
+The same mindset applied to warm starts, clipping and export. If a resumed training run changed the incumbent simply by loading it, that was a bug, not a new experiment.
+
+### 6. Promote whole engines, not isolated metrics
+
+Every serious candidate eventually had to play through the real referee shape at the real clock, with colours paired and the source/model identity frozen. Static validation, nodes per second and microbenchmarks were diagnostic tools, not promotion criteria by themselves.
+
+That discipline also meant rejecting work. Several changes that looked attractive in isolation were neutral or worse once the evaluator, search tree and clock interacted. Keeping the known-good build was often the right decision.
+
+### 7. Freeze v4 and keep the research separate
+
+Once v4 was stable, I kept it as a protected baseline while testing larger and more experimental successors. That separation is reflected in this public repository too: the later F512 evaluator and richer feature work are useful research, but they are not retroactively presented as the architecture that produced the competition result.
+
+## Public release
+
+A fresh clone is deliberately usable without downloading a checkpoint. [`agent.py`](agent.py) runs the classical reference evaluator, while [`engine/agent_rx.py`](engine/agent_rx.py) exposes the neural runtime when given an explicit model artifact.
+
+The public repository includes:
+
+- board representation, move generation, search and time management
+- integer neural inference and incremental accumulator logic
+- training records, splits, checkpointing and export code
+- differential correctness and failure-path tests
+- local benchmark tooling with environment metadata
+
+It does **not** include tournament weights, private datasets, opening assets or historical playing-strength result files.
+
+## Quickstart
+
+Use CPython 3.12.
 
 ```sh
 uv sync --locked --extra dev
 ```
 
-Alternatively:
+Or:
 
 ```sh
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
 ```
 
-The locked environment includes NumPy, Numba, python-chess and development tools. The reference trainer runs on CPU using NumPy; PyTorch, a GPU and cloud credentials are not required.
+Choose a move with the weights-free reference adapter:
 
 ```sh
 .venv/bin/python - <<'PY'
@@ -173,147 +208,53 @@ print(move)
 PY
 ```
 
-The adapter owns mutable state for **one game**. Use a fresh process per game and serial calls. It returns a UCI move, or `0000` when no legal move exists; invalid positions raise `ValueError`. The default baseline is separate from the neural runtime and from the competition checkpoint.
+## Train the public reference evaluator
 
-## Train your own evaluator
-
-The source includes an executable reference pipeline:
-
-```text
-PGNs or typed teacher observations
-    → validated records and immutable hashed shards
-    → deduplication and grouped split assignment
-    → sparse feature encoding
-    → quantization-aware optimization
-    → atomic checkpoints
-    → RXF1 integer export
-    → runtime load and parity checks
-```
-
-### 1. Build a training shard
-
-The bundled PGNs are small parser/training fixtures suitable for checking the workflow. Replace `training/testdata` with a directory of your own appropriately licensed PGNs for an actual experiment. Completed PGNs provide **game-outcome supervision**, not searched centipawn or action-value labels.
-
-```sh
-.venv/bin/python - <<'PY'
-from pathlib import Path
-from training.extract_pgn import extract_pgn_file
-from training.feature_spec import SPEC
-from training.records import write_shard
-from training.splits import assign_splits, assert_no_leakage
-
-input_dir = Path("training/testdata")
-records = []
-for path in sorted(input_dir.glob("*.pgn")):
-    records.extend(extract_pgn_file(str(path), corpus=path.stem))
-if not records:
-    raise ValueError("No PGN positions found")
-
-splits = assign_splits(records)
-assert_no_leakage(splits.kept)
-counts = {name: sum(r["split"] == name for r in splits.kept)
-          for name in ("train", "development", "sealed", "quarantine")}
-print("Split counts:", counts)
-if not counts["train"]:
-    raise ValueError("No training cluster; supply more independent games")
-
-manifest = write_shard(
-    "models/demo-shard", records,
-    shard_id="demo-pgn-v1", feature_schema_id=SPEC.schema_id,
-)
-print("Records:", manifest["record_count"])
-print("Payload SHA-256:", manifest["payload_sha256"])
-PY
-```
-
-Shard directories are immutable: use a new name to ingest a new dataset. Splits operate on connected groups of related observations, games and positions. Highly overlapping games can collapse into a single group; an empty development partition must not be presented as a held-out evaluation.
-
-### 2. Run a small training job
+The bundled PGNs are small fixtures for exercising the pipeline, not tournament training data. Build your own appropriately licensed dataset shard and run:
 
 ```sh
 .venv/bin/python -m training.train models/demo-shard \
   --out models/miskeen-demo --epochs 2 --batch 256 --lr 0.1
 ```
 
-This is a workflow demonstration, not a reproduction of the tournament model. Increase the dataset and training budget only after inspecting data quality, split coverage and exported evaluation behaviour. Training loads records, feature caches, parameters and optimizer state into memory; its memory requirement is separate from the deployed engine's 2 GB limit. The retained implementation is a CPU reference trainer, not a streaming or distributed training service.
+The full typed-record and model contracts live under [`spec/RX_FINAL_PLAN/`](spec/RX_FINAL_PLAN/).
 
-Allow at least **2 GB of free disk space for this small demo**. A checkpoint stores floating-point parameters and optimizer moments and can be hundreds of MiB; longer runs accumulate multiple checkpoints. The roughly 33 MB integer export is much smaller than the training state.
+## Verification
 
-The trainer writes checkpoints under `models/miskeen-demo/checkpoints/` and a raw RXF1 export at `models/miskeen-demo/pilot.rxf1`. Repeating the command resumes the latest checkpoint in that output directory. Keep the dataset and configuration unchanged when resuming; use a new output directory for a different experiment. `--epochs` specifies the total target epochs, not extra epochs to append.
-
-The reference forward pass quantizes folded coefficients during optimization and uses straight-through gradients. Losses can combine scalar value, WDL, game outcome, bound-aware supervision and consistency; action-regret terms require suitable action-labelled data. The CLI prints training loss. Development records are partitioned, but this CLI does **not** compute a held-out score or playing-strength estimate.
-
-### 3. Load the exported model
-
-The runtime accepts raw RXF1 **bytes**. A path passed directly to `init` uses the separate NumPy-container loader, so read a raw `.rxf1` file explicitly:
+The repository keeps the test and benchmark machinery, not historical outputs.
 
 ```sh
-.venv/bin/python - <<'PY'
-from pathlib import Path
-import chess
-from engine import agent_rx
-
-# Load and warm before starting the move clock.
-agent_rx.init(Path("models/miskeen-demo/pilot.rxf1").read_bytes(), tt_mib=8)
-board = chess.Board()
-move = agent_rx.get_move(board.fen(), 1_000)
-assert chess.Move.from_uci(move) in board.legal_moves
-print(move)
-PY
+make lint
+make test
+make benchmark
+make test-deep
 ```
 
-For richer training data, use the [typed record schema](spec/RX_FINAL_PLAN/training_schema.json) and [record constructors](training/records.py). Preserve teacher identity, source hashes, score perspective, bound type, termination and censoring. A fail-high bound is not a point label; a skipped relabel is not a win; a child's side-to-move score needs conversion before it represents the parent's action value.
+The suite covers move-generation agreement, reversible state, draw and repetition semantics, abort-safe search, integer evaluator parity, serialization, data-split leakage and compiled-cache loading.
 
-## Verify and measure
+Benchmarks are written locally with source and environment metadata. They are intended to compare changes on a controlled machine, not to act as public Elo claims.
 
-```sh
-make lint       # static checks and formatting
-make test       # default correctness and numerical regression suite
-make benchmark  # fixed-depth classical search; structured JSON output
-make test-deep  # extended perft and randomized stress checks; potentially hours
-```
-
-Tests cover differential move generation against python-chess, reversible state, repetition and draw boundaries, abort-safe commits, integer parity, packed-container corruption, split leakage and checkpoint/export behaviour. The compiled-cache regression uses separate processes to catch failures that appear only after loading cached machine code.
-
-The benchmark records source revision and SHA-256, dependency versions, platform, evaluator/backend configuration, nodes, elapsed time and individual samples. It uses fixed positions and a fresh 8 MiB transposition table per sample. It excludes initialization and model loading; its local timings are not an EPYC qualification result or an Elo estimate.
-
-See [verification methodology and recorded local checks](docs/verification.md). CI uses a locked Python environment, pinned action revisions, lint, default tests, package builds and an installed-wheel smoke check outside the source checkout.
+See [`docs/architecture.md`](docs/architecture.md) and [`docs/verification.md`](docs/verification.md) for the deeper engineering notes.
 
 ## Repository map
 
 ```text
-agent.py                  weights-free, single-game reference adapter
+agent.py                 weights-free reference adapter
 engine/
-  board.py, movegen.py     position representation and legal moves
-  search.py, history.py   PVS, quiescence, selectivity and ordering
-  state.py, tt.py          history, counters and context-qualified caching
-  features.py             canonical feature encoders and deltas
-  evaluate.py             integer inference and accumulator lifecycle
-  model_io.py             RXF1 validation, packing and bounded decoding
-  agent_rx.py             neural-runtime integration
-  kernels/                compiled search, evaluation and clock bridge
-  clock_b/                allocation and deadline utilities
-training/                 records, splits, trainer, checkpoints and export
-spec/RX_FINAL_PLAN/       evaluator/data contracts and scalar packing oracle
-tests/                    differential, numerical and failure-path regressions
-bench/                    reproducible local measurements
-docs/                     architecture, verification and competition screenshot
+  board.py, movegen.py   board representation and legal moves
+  search.py, history.py  PVS, quiescence, pruning and ordering
+  state.py, tt.py        history, counters and cache semantics
+  evaluate.py            integer evaluation and accumulator lifecycle
+  agent_rx.py            neural runtime integration
+  kernels/               Numba-compiled search and evaluation
+  clock_b/               allocation and deadline handling
+training/                records, splits, trainer, checkpoints and export
+spec/RX_FINAL_PLAN/      post-competition evaluator and data contracts
+tests/                   correctness and failure-path regressions
+bench/                   local benchmark tooling
+docs/                    architecture and verification notes
 ```
 
-## Deployment context and scope
+## Licence
 
-The competition environment required one CPU core, 2 GB RAM, no network or GPU, and at most 50,000,000 unpacked bytes, with a 120-second clock plus 0.5 seconds per legal move. The [competition documentation](https://aichessathon.com/docs), checked 12 September 2026, distinguishes 90-second qualifier initialization from 30-second final initialization. This public source release has not been requalified against the final initialization budget.
-
-Tournament checkpoints, private datasets, provider administration and historical experiment archives are excluded. The qualification result belongs to Miskeen's competition entry; new models trained from this repository must establish their own strength through controlled, paired-colour games and complete-package resource checks.
-
-## About the name
-
-*Miskeen* takes its name from Arabic [*miskīn* (مسكين)](https://www.arabicacademy.gov.eg/ar/محرك-البحث/معجم/dic-19/المسكين). It is a small nod to the project's beginnings without large-scale compute, and the emphasis that followed: efficient algorithms, careful measurement and making the most of the available hardware.
-
-> “We must make the best use that we can of the things which are in our power…”
->
-> — Epictetus, [*Discourses*, Book I, Chapter 1](https://classics.mit.edu/Epictetus/discourses.1.one.html), excerpt
-
-## Licence and attribution
-
-GPL-3.0-or-later. See [LICENSE](LICENSE), [third-party notices](THIRD_PARTY_NOTICES.md) and [contribution guidelines](CONTRIBUTING.md). Component provenance is retained, and no upstream pretrained chess network is distributed.
+GPL-3.0-or-later. See [LICENSE](LICENSE), [third-party notices](THIRD_PARTY_NOTICES.md) and [contribution guidelines](CONTRIBUTING.md).
