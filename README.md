@@ -1,10 +1,10 @@
-# Miskeen | AI Chessathon
+# AI Chessathon
 
 [![Checks](https://github.com/TahaKhanM/AIChessathon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TahaKhanM/AIChessathon/actions/workflows/ci.yml)
 
 **2nd out of ~500 teams in the Global AIChessathon Final Qualification**
 
-I built Miskeen around a simple question: how strong a chess engine could I make when the deployed agent gets one CPU core, 2 GB of RAM, no network, no GPU and a 50 MB package limit?
+I built my engine around a simple question: how strong a chess engine could I make when the deployed agent gets one CPU core, 2 GB of RAM, no network, no GPU and a 50 MB package limit?
 
 By v4, the engine combined a custom Numba-compiled bitboard searcher with an incrementally updated NNUE-style evaluator that I trained from scratch. The hard part was not making either half impressive in isolation. It was getting the **search, model, memory layout and clock to work as one system**.
 
