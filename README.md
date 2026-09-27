@@ -2,9 +2,11 @@
 
 [![Checks](https://github.com/TahaKhanM/AIChessathon/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TahaKhanM/AIChessathon/actions/workflows/ci.yml)
 
-**2nd of 334 teams in AI Chessathon Final Qualification · 10/13 points**
+**2nd out of ~500 teams in AIChessathon · 10/13 points in Final Qualification**
 
-The completed 13-round Swiss had 334 teams; the broader competition field was approximately 500. The engine scored eight wins, four draws and one loss. [Retained qualification leaderboard](docs/assets/miskeen-final-qualification.png).
+The competition field was approximately 500 teams. The engine finished second in Final Qualification with eight wins, four draws and one loss over 13 rounds.
+
+![AIChessathon Final Qualification leaderboard showing the Warwick entry in second place](docs/assets/aichessathon-leaderboard.png)
 
 I built the engine around a simple question: how strong a chess engine could I make when the deployed agent gets one CPU core, 2 GB of RAM, no network, no GPU and a 50 MB package limit?
 
